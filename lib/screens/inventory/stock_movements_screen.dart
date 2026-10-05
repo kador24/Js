@@ -133,7 +133,7 @@ class _StockMovementsScreenState extends State<StockMovementsScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: _movements.isEmpty
-                  ? const ListView(
+                  ? ListView(
                       children: [
                         SizedBox(height: 250),
                         Center(child: Text('لا توجد حركات')),

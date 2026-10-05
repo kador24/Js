@@ -43,7 +43,7 @@ class BackupSchedulerService {
       _taskName,
       frequency: duration,
       existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
-      constraints: const Constraints(networkType: NetworkType.connected),
+      constraints: Constraints(networkType: NetworkType.connected),
     );
   }
 }
