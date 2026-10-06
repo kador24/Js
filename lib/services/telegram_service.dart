@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -73,11 +74,24 @@ class TelegramService {
       if (queueIfOffline) await _queueTask('message', text);
       throw Exception('لا يوجد اتصال بالإنترنت؛ تم حفظ المهمة للمحاولة لاحقًا');
     }
-    final response = await http.post(
-      Uri.parse('https://api.telegram.org/bot$token/sendMessage'),
-      body: {'chat_id': chatId, 'text': text},
-    ).timeout(const Duration(seconds: 20));
-    if (response.statusCode != 200) throw Exception('فشل إرسال الرسالة: ${response.body}');
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.telegram.org/bot$token/sendMessage'),
+        body: {'chat_id': chatId, 'text': text},
+      ).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        if (queueIfOffline && response.statusCode >= 500) {
+          await _queueTask('message', text);
+        }
+        throw Exception('فشل إرسال الرسالة: ${response.body}');
+      }
+    } on SocketException {
+      if (queueIfOffline) await _queueTask('message', text);
+      rethrow;
+    } on TimeoutException {
+      if (queueIfOffline) await _queueTask('message', text);
+      throw Exception('انتهت مهلة إرسال الرسالة؛ تم حفظ المهمة للمحاولة لاحقًا');
+    }
   }
 
   Future<void> sendDocument(String filePath, {String? caption, bool queueIfOffline = true}) async {
@@ -90,12 +104,30 @@ class TelegramService {
       if (queueIfOffline) await _queueTask('document', jsonEncode({'path': filePath, 'caption': caption}));
       throw Exception('لا يوجد اتصال بالإنترنت؛ تم حفظ المهمة للمحاولة لاحقًا');
     }
-    final request = http.MultipartRequest('POST', Uri.parse('https://api.telegram.org/bot$token/sendDocument'));
-    request.fields['chat_id'] = chatId;
-    if (caption != null && caption.isNotEmpty) request.fields['caption'] = caption;
-    request.files.add(await http.MultipartFile.fromPath('document', filePath));
-    final response = await request.send().timeout(const Duration(seconds: 45));
-    if (response.statusCode != 200) throw Exception('فشل إرسال الملف: ${await response.stream.bytesToString()}');
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('https://api.telegram.org/bot$token/sendDocument'));
+      request.fields['chat_id'] = chatId;
+      if (caption != null && caption.isNotEmpty) request.fields['caption'] = caption;
+      request.files.add(await http.MultipartFile.fromPath('document', filePath));
+      final response = await request.send().timeout(const Duration(seconds: 45));
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString();
+        if (queueIfOffline && response.statusCode >= 500) {
+          await _queueTask('document', jsonEncode({'path': filePath, 'caption': caption}));
+        }
+        throw Exception('فشل إرسال الملف: $body');
+      }
+    } on SocketException {
+      if (queueIfOffline) {
+        await _queueTask('document', jsonEncode({'path': filePath, 'caption': caption}));
+      }
+      rethrow;
+    } on TimeoutException {
+      if (queueIfOffline) {
+        await _queueTask('document', jsonEncode({'path': filePath, 'caption': caption}));
+      }
+      throw Exception('انتهت مهلة إرسال الملف؛ تم حفظ المهمة للمحاولة لاحقًا');
+    }
   }
 
   Future<void> sendScheduledBackup() async {
@@ -115,7 +147,8 @@ class TelegramService {
     }
 
     try {
-      await sendDocument(backupPath, caption: report, queueIfOffline: false);
+      await sendDocument(backupPath, queueIfOffline: true);
+      await sendMessage(report, queueIfOffline: true);
       await _settings.set('last_backup_at', DateTime.now().toIso8601String());
       await _settings.set('last_backup_status', 'sent');
     } catch (_) {
@@ -158,7 +191,21 @@ class TelegramService {
         if (next >= 8) {
           await db.delete('pending_telegram', where: 'id = ?', whereArgs: [id]);
         } else {
-          await db.update('pending_telegram', {'retries': next}, where: 'id = ?', whereArgs: [id]);
+          final path = task['type'] == 'document'
+              ? (() {
+                  try {
+                    final data = jsonDecode(task['payload'] as String) as Map;
+                    return data['path']?.toString();
+                  } catch (_) {
+                    return null;
+                  }
+                })()
+              : null;
+          if (path != null && !await File(path).exists()) {
+            await db.delete('pending_telegram', where: 'id = ?', whereArgs: [id]);
+          } else {
+            await db.update('pending_telegram', {'retries': next}, where: 'id = ?', whereArgs: [id]);
+          }
         }
       }
     }

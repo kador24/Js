@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/sale.dart';
 import '../../providers/app_provider.dart';
-import '../../services/sale_service.dart';
 import '../../theme/app_theme.dart';
 import 'new_sale_screen.dart';
 import 'sale_detail_screen.dart';
@@ -15,7 +14,6 @@ class SalesScreen extends StatefulWidget {
 }
 
 class _SalesScreenState extends State<SalesScreen> {
-  final _service = SaleService();
   List<Sale> _sales = [];
   bool _loading = true;
 
@@ -24,7 +22,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    try { _sales = await _service.getAll(); } finally { if (mounted) setState(() => _loading = false); }
+    try { _sales = await context.read<AppProvider>().salesService.getAll(); } finally { if (mounted) setState(() => _loading = false); }
   }
 
   @override

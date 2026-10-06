@@ -2,22 +2,47 @@ import 'package:flutter/material.dart';
 import '../models/category.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
+import '../repositories/store_repository.dart';
 import '../services/backup_scheduler_service.dart';
+import '../services/backup_service.dart';
 import '../services/category_service.dart';
 import '../services/expense_service.dart';
 import '../services/financial_service.dart';
 import '../services/product_service.dart';
+import '../services/purchase_service.dart';
+import '../services/report_service.dart';
 import '../services/sale_service.dart';
 import '../services/settings_service.dart';
+import '../services/supplier_service.dart';
 import '../services/telegram_service.dart';
 
 class AppProvider extends ChangeNotifier {
-  final SettingsService _settings = SettingsService();
-  final ProductService _products = ProductService();
-  final SaleService _sales = SaleService();
-  final CategoryService _categories = CategoryService();
-  final FinancialService _financial = FinancialService();
-  final TelegramService _telegram = TelegramService();
+  AppProvider() {
+    _settings = SettingsService(repository: _repository);
+    _products = ProductService(repository: _repository);
+    _sales = SaleService(repository: _repository);
+    _purchases = PurchaseService(repository: _repository);
+    _suppliers = SupplierService(repository: _repository);
+    _categories = CategoryService(repository: _repository);
+    _financial = FinancialService(repository: _repository);
+    _reports = ReportService(repository: _repository);
+    _expenses = ExpenseService(repository: _repository);
+    _backup = BackupService();
+    _telegram = TelegramService();
+  }
+
+  final StoreRepository _repository = StoreRepository();
+  late final SettingsService _settings;
+  late final ProductService _products;
+  late final SaleService _sales;
+  late final PurchaseService _purchases;
+  late final SupplierService _suppliers;
+  late final CategoryService _categories;
+  late final FinancialService _financial;
+  late final ReportService _reports;
+  late final ExpenseService _expenses;
+  late final BackupService _backup;
+  late final TelegramService _telegram;
 
   ThemeMode _themeMode = ThemeMode.system;
   String _currency = 'دج';
@@ -44,15 +69,28 @@ class AppProvider extends ChangeNotifier {
   double get currentCapital => financialSummary['currentCapital'] ?? 0;
   double get cashBalance => financialSummary['cashBalance'] ?? 0;
   double get receivables => financialSummary['receivables'] ?? 0;
+  double get supplierPayables => financialSummary['supplierPayables'] ?? 0;
   double get netProfit => financialSummary['netProfit'] ?? 0;
   bool get autoBackupEnabled => _autoBackupEnabled;
   String get backupFrequency => _backupFrequency;
+  ProductService get productsService => _products;
+  SaleService get salesService => _sales;
+  PurchaseService get purchasesService => _purchases;
+  SupplierService get suppliersService => _suppliers;
+  CategoryService get categoriesService => _categories;
+  FinancialService get financialService => _financial;
+  ReportService get reportsService => _reports;
+  ExpenseService get expensesService => _expenses;
+  BackupService get backupService => _backup;
+  TelegramService get telegramService => _telegram;
+  StoreRepository get repository => _repository;
 
   bool _autoBackupEnabled = true;
   String _backupFrequency = 'weekly';
 
   Future<void> init() async {
     _loading = true;
+    _error = null;
     notifyListeners();
     try {
       final settings = await _settings.getAll();
@@ -76,9 +114,10 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _applyBackupSchedule(Map<String, String>? values) async {
     final settings = values ?? await _settings.getAll();
-    final enabled = settings['auto_backup_enabled'] != 'false';
-    final frequency = settings['backup_frequency'] ?? 'weekly';
-    await BackupSchedulerService.schedule(enabled: enabled, frequency: frequency);
+    await BackupSchedulerService.schedule(
+      enabled: settings['auto_backup_enabled'] != 'false',
+      frequency: settings['backup_frequency'] ?? 'weekly',
+    );
   }
 
   Future<void> refreshDashboard() async {
@@ -116,7 +155,9 @@ class AppProvider extends ChangeNotifier {
     if (key == 'currency') _currency = value;
     if (key == 'backup_frequency') _backupFrequency = value;
     if (key == 'auto_backup_enabled') _autoBackupEnabled = value != 'false';
-    if (key == 'backup_frequency' || key == 'auto_backup_enabled') await _applyBackupSchedule(null);
+    if (key == 'backup_frequency' || key == 'auto_backup_enabled') {
+      await _applyBackupSchedule(null);
+    }
     notifyListeners();
   }
 

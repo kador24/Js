@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../models/product.dart';
-import '../../services/product_service.dart';
-import '../../services/category_service.dart';
 import '../../theme/app_theme.dart';
 import 'product_form_screen.dart';
 import '../barcode/barcode_scanner_screen.dart';
@@ -17,7 +15,6 @@ class ProductsScreen extends StatefulWidget {
 
 class _ProductsScreenState extends State<ProductsScreen> {
   final _searchController = TextEditingController();
-  final _productService = ProductService();
   List<Product> _products = [];
   bool _loading = true;
   int? _filterCategory;
@@ -31,7 +28,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    _products = await _productService.getAll(
+    _products = await context.read<AppProvider>().productsService.getAll(
       search: _searchController.text.isEmpty ? null : _searchController.text,
       categoryId: _filterCategory,
     );
@@ -55,7 +52,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
               );
               if (result != null && mounted) {
-                final product = await _productService.getByBarcode(result);
+                final product = await context.read<AppProvider>().productsService.getByBarcode(result);
                 if (product != null) {
                   Navigator.push(context, MaterialPageRoute(
                     builder: (_) => ProductFormScreen(product: product),

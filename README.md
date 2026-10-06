@@ -26,6 +26,7 @@
 
 - Flutter 3.47.6
 - Dart 3.13+
+- App version 1.1.1+4
 - Java 17
 - Android Gradle Plugin 8.11.1
 - Gradle 8.14.0

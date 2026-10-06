@@ -13,16 +13,19 @@ class NewSaleScreen extends StatefulWidget {
 }
 
 class _NewSaleScreenState extends State<NewSaleScreen> {
-  final _productService = ProductService();
-  final _saleService = SaleService();
   final _customerName = TextEditingController();
   final _customerPhone = TextEditingController();
   final _discount = TextEditingController(text: '0');
   final _paid = TextEditingController(text: '0');
+  final _paymentNote = TextEditingController();
   final List<Map<String, dynamic>> _cart = [];
   String _paymentMethod = 'cash';
+  String _initialPaymentMethod = 'cash';
   DateTime? _dueDate;
   bool _saving = false;
+
+  ProductService get _productService => context.read<AppProvider>().productsService;
+  SaleService get _saleService => context.read<AppProvider>().salesService;
 
   double get subtotal => _cart.fold(0, (sum, item) => sum + (item['unitPrice'] as double) * (item['quantity'] as int));
   double get discount => double.tryParse(_discount.text.replaceAll(',', '')) ?? 0;
@@ -118,6 +121,8 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
         discount: discount,
         paymentMethod: _paymentMethod,
         initialPayment: paid,
+        initialPaymentMethod: _initialPaymentMethod,
+        initialPaymentNote: _paymentNote.text,
         dueDate: _dueDate?.toIso8601String(),
       );
       if (!mounted) return;
@@ -169,8 +174,19 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
             ]),
             if (_paymentMethod == 'credit') ...[
               const SizedBox(height: 8),
-              Row(children: [Expanded(child: TextField(controller: _paid, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'الدفعة الآن'))), const SizedBox(width: 8), Expanded(child: OutlinedButton.icon(onPressed: _pickDueDate, icon: const Icon(Icons.event), label: Text(_dueDate == null ? 'تاريخ الاستحقاق' : '${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')}')))],),
+              Row(children: [
+                Expanded(child: TextField(controller: _paid, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'الدفعة الآن'))),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton.icon(onPressed: _pickDueDate, icon: const Icon(Icons.event), label: Text(_dueDate == null ? 'تاريخ الاستحقاق' : '${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')}'))),
+              ]),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(value: _initialPaymentMethod, decoration: const InputDecoration(labelText: 'طريقة الدفعة الأولى'), items: const [
+                DropdownMenuItem(value: 'cash', child: Text('نقدي')),
+                DropdownMenuItem(value: 'card', child: Text('بطاقة')),
+                DropdownMenuItem(value: 'transfer', child: Text('تحويل')),
+              ], onChanged: (v) => setState(() => _initialPaymentMethod = v ?? 'cash')),
             ],
+            if (_paymentMethod == 'credit') TextField(controller: _paymentNote, decoration: const InputDecoration(labelText: 'ملاحظة الدفعة الآن', prefixIcon: Icon(Icons.note_alt_outlined))),
             const SizedBox(height: 8),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('الإجمالي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), Text(app.formatMoney(total), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20))]),
             if (_paymentMethod == 'credit') Align(alignment: Alignment.centerRight, child: Text('متبقي: ${app.formatMoney((total - (double.tryParse(_paid.text) ?? 0)).clamp(0, double.infinity).toDouble())}')),
@@ -183,7 +199,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   }
 
   @override
-  void dispose() { _customerName.dispose(); _customerPhone.dispose(); _discount.dispose(); _paid.dispose(); super.dispose(); }
+  void dispose() { _customerName.dispose(); _customerPhone.dispose(); _discount.dispose(); _paid.dispose(); _paymentNote.dispose(); super.dispose(); }
 }
 
 class _EmptyCart extends StatelessWidget {

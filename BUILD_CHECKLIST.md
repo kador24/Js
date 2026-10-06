@@ -3,6 +3,7 @@
 ## 1. قبل الرفع
 
 - `pubspec.yaml` موجود.
+- إصدار التطبيق الحالي: `1.1.1+4`.
 - لا يوجد `pubspec.lock` قديم من Flutter 3.24.
 - لا يوجد `google_fonts`.
 - لا يوجد `await import(...)` في Dart.

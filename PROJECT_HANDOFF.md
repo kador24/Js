@@ -2,6 +2,8 @@
 
 Prepared from the Jamal Phone Manager codebase for final validation and deployment.
 
+Current app version: `1.1.1+4`.
+
 ## Prepared Android stack
 
 - Flutter 3.47.6
@@ -35,6 +37,8 @@ Prepared from the Jamal Phone Manager codebase for final validation and deployme
 9. The public storefront and private financial app remain separate.
 
 ## Final verification still required
+
+The source archive has been statically audited and patched in this handoff. A full Flutter/Android build was not executed in this container because Flutter is not installed in the available runtime. GitHub Actions remains the authoritative build validation path.
 
 A real Flutter runner should execute:
 

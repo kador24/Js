@@ -1,7 +1,7 @@
 name: jamal_phone_manager
 description: تطبيق إدارة متجر Jamal Phone - إدارة المنتجات والمخزون والمبيعات والمشتريات والحسابات والنسخ الاحتياطية.
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.1.1+4
 
 environment:
   sdk: '>=3.13.0 <4.0.0'
@@ -38,6 +38,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: 6.0.0
+  sqflite_common_ffi: ^2.4.3
 
 flutter:
   uses-material-design: true

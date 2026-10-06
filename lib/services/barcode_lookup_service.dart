@@ -9,7 +9,7 @@ class BarcodeLookupSuggestion {
 }
 
 class BarcodeLookupService {
-  static const _userAgent = 'JamalPhoneManager/1.1 (offline-first shop manager)';
+  static const _userAgent = 'JamalPhoneManager/1.1.1 (offline-first shop manager)';
 
   Future<BarcodeLookupSuggestion?> lookup(String barcode) async {
     final clean = barcode.trim();

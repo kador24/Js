@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/product.dart';
 import '../../models/stock_movement.dart';
-import '../../services/product_service.dart';
+import '../../providers/app_provider.dart';
 
 class StockMovementsScreen extends StatefulWidget {
   const StockMovementsScreen({super.key});
@@ -11,7 +11,6 @@ class StockMovementsScreen extends StatefulWidget {
 }
 
 class _StockMovementsScreenState extends State<StockMovementsScreen> {
-  final _service = ProductService();
   List<StockMovement> _movements = [];
   bool _loading = true;
 
@@ -24,7 +23,7 @@ class _StockMovementsScreenState extends State<StockMovementsScreen> {
   Future<void> _load() async {
     if (mounted) setState(() => _loading = true);
     try {
-      _movements = await _service.getMovements();
+      _movements = await context.read<AppProvider>().productsService.getMovements();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -39,7 +38,7 @@ class _StockMovementsScreenState extends State<StockMovementsScreen> {
       }[value] ?? value;
 
   Future<void> _adjustStock() async {
-    final products = await _service.getAll();
+    final products = await context.read<AppProvider>().productsService.getAll();
     if (!mounted) return;
     if (products.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -100,7 +99,7 @@ class _StockMovementsScreenState extends State<StockMovementsScreen> {
     final value = int.tryParse(target.text.trim());
     if (saved == true && selected?.id != null && value != null && value >= 0) {
       try {
-        await _service.setStock(selected!.id!, value, notes: note.text.trim().isEmpty ? null : note.text.trim());
+        await context.read<AppProvider>().productsService.setStock(selected!.id!, value, notes: note.text.trim().isEmpty ? null : note.text.trim());
         await _load();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -133,7 +132,7 @@ class _StockMovementsScreenState extends State<StockMovementsScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: _movements.isEmpty
-                  ? ListView(
+                  ? const ListView(
                       children: [
                         SizedBox(height: 250),
                         Center(child: Text('لا توجد حركات')),

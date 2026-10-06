@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/sale.dart';
 import '../../providers/app_provider.dart';
-import '../../services/sale_service.dart';
 import '../../theme/app_theme.dart';
 
 class SaleDetailScreen extends StatefulWidget {
@@ -13,26 +12,71 @@ class SaleDetailScreen extends StatefulWidget {
 }
 
 class _SaleDetailScreenState extends State<SaleDetailScreen> {
-  final _service = SaleService();
   Sale? _sale;
   bool _loading = true;
   @override
   void initState() { super.initState(); _load(); }
-  Future<void> _load() async { _sale = await _service.getById(widget.saleId); if (mounted) setState(() => _loading = false); }
+  Future<void> _load() async { _sale = await context.read<AppProvider>().salesService.getById(widget.saleId); if (mounted) setState(() => _loading = false); }
 
   Future<void> _return() async {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('إرجاع الفاتورة'), content: const Text('سيعاد كامل المخزون وتعتبر الفاتورة مرتجعة في التقارير. هل أنت متأكد؟'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('إرجاع'))]));
     if (ok != true) return;
-    try { await _service.returnSale(widget.saleId); if (mounted) { await context.read<AppProvider>().refreshDashboard(); Navigator.pop(context, true); } } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red)); }
+    try { await context.read<AppProvider>().salesService.returnSale(widget.saleId); if (mounted) { await context.read<AppProvider>().refreshDashboard(); Navigator.pop(context, true); } } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red)); }
   }
 
   Future<void> _collect() async {
     final sale = _sale!;
     final ctrl = TextEditingController(text: sale.remainingAmount.toStringAsFixed(0));
-    final amount = await showDialog<double>(context: context, builder: (ctx) => AlertDialog(title: const Text('تحصيل دفعة'), content: TextField(controller: ctrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'المبلغ', helperText: 'المتبقي ${context.read<AppProvider>().formatMoney(sale.remainingAmount)}')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(ctx, double.tryParse(ctrl.text.replaceAll(',', ''))), child: const Text('حفظ'))]));
+    final noteCtrl = TextEditingController();
+    var method = 'cash';
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('تحصيل دفعة'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: ctrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'المبلغ', helperText: 'المتبقي ${context.read<AppProvider>().formatMoney(sale.remainingAmount)}')),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: method,
+                decoration: const InputDecoration(labelText: 'طريقة التحصيل'),
+                items: const [
+                  DropdownMenuItem(value: 'cash', child: Text('نقدي')),
+                  DropdownMenuItem(value: 'card', child: Text('بطاقة')),
+                  DropdownMenuItem(value: 'transfer', child: Text('تحويل')),
+                ],
+                onChanged: (v) => setDialogState(() => method = v ?? 'cash'),
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: noteCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'ملاحظة', prefixIcon: Icon(Icons.notes))),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, {'amount': double.tryParse(ctrl.text.replaceAll(',', '')), 'method': method, 'note': noteCtrl.text.trim()}), child: const Text('حفظ')),
+          ],
+        ),
+      ),
+    );
     ctrl.dispose();
+    noteCtrl.dispose();
+    final amount = result?['amount'] as double?;
     if (amount == null) return;
-    try { await _service.recordReceivablePayment(widget.saleId, amount); await _load(); await context.read<AppProvider>().refreshDashboard(); if (mounted) setState(() {}); } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red)); }
+    try {
+      await context.read<AppProvider>().salesService.recordReceivablePayment(
+        widget.saleId,
+        amount,
+        paymentMethod: result?['method'] as String? ?? 'cash',
+        note: result?['note'] as String?,
+      );
+      await _load();
+      await context.read<AppProvider>().refreshDashboard();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
   }
 
   @override
@@ -57,7 +101,7 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
         if (sale.isCredit && !sale.isReturned) Padding(padding: const EdgeInsets.only(top: 10), child: FilledButton.icon(onPressed: _collect, icon: const Icon(Icons.payments), label: const Text('تحصيل دفعة'))),
         const SizedBox(height: 12),
         const Text('المنتجات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        ...sale.items.map((item) => Card(child: ListTile(title: Text(item.productName), subtitle: Text('${item.quantity} × ${app.formatMoney(item.unitPrice)}'), trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text(app.formatMoney(item.totalPrice), style: const TextStyle(fontWeight: FontWeight.bold)), Text('ربح ${app.formatMoney(item.profit)}', style: const TextStyle(fontSize: 11, color: AppTheme.successColor))]))),
+        ...sale.items.map((item) => Card(child: ListTile(title: Text(item.productName), subtitle: Text('${item.quantity} × ${app.formatMoney(item.unitPrice)}'), trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text(app.formatMoney(item.totalPrice), style: const TextStyle(fontWeight: FontWeight.bold)), Text('ربح ${app.formatMoney(item.profit)}', style: const TextStyle(fontSize: 11, color: AppTheme.successColor))])))),
         const SizedBox(height: 10),
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [_row('المجموع', app.formatMoney(sale.subtotal)), if (sale.discount > 0) _row('الخصم', '- ${app.formatMoney(sale.discount)}'), const Divider(), _row('الإجمالي', app.formatMoney(sale.total), bold: true), _row('الربح', app.formatMoney(sale.profit), color: AppTheme.successColor, bold: true)]))),
       ]),

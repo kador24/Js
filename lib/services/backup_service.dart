@@ -8,20 +8,40 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../database/database_helper.dart';
 
 class BackupService {
-  final DatabaseHelper _db = DatabaseHelper.instance;
-  final FlutterSecureStorage _secure = const FlutterSecureStorage();
+  BackupService({
+    DatabaseHelper? database,
+    FlutterSecureStorage? secureStorage,
+    Directory? backupDirectory,
+    Directory? productImagesDirectory,
+    List<int>? testMasterKey,
+  })  : _db = database ?? DatabaseHelper.instance,
+        _secure = secureStorage ?? const FlutterSecureStorage(),
+        _backupDirectoryOverride = backupDirectory,
+        _productImagesDirectoryOverride = productImagesDirectory,
+        _testMasterKey = testMasterKey;
+
   static const _keyName = 'jamal_backup_master_key_v1';
   static const _format = 'JPM-ENCRYPTED-1';
+  static const _dataFormat = 'JPM-DATA-2';
   static const _version = 2;
   final AesGcm _aes = AesGcm.with256bits();
 
+  final DatabaseHelper _db;
+  final FlutterSecureStorage _secure;
+  final Directory? _backupDirectoryOverride;
+  final Directory? _productImagesDirectoryOverride;
+  final List<int>? _testMasterKey;
+
   Future<List<int>> _getOrCreateKey() async {
+    if (_testMasterKey != null) return List<int>.unmodifiable(_testMasterKey!);
     final saved = await _secure.read(key: _keyName);
     if (saved != null && saved.isNotEmpty) {
       try {
         final decoded = base64Url.decode(saved);
         if (decoded.length == 32) return decoded;
-      } catch (_) {}
+      } catch (_) {
+        // Generate a fresh key only when the secure entry is invalid.
+      }
     }
     final secret = await _aes.newSecretKey();
     final bytes = await secret.extractBytes();
@@ -29,10 +49,8 @@ class BackupService {
     return bytes;
   }
 
-  Future<String> getRecoveryKey() async {
-    final bytes = await _getOrCreateKey();
-    return base64UrlEncode(bytes);
-  }
+  Future<String> getRecoveryKey() async =>
+      base64UrlEncode(await _getOrCreateKey());
 
   Future<void> importRecoveryKey(String key) async {
     try {
@@ -45,6 +63,11 @@ class BackupService {
   }
 
   Future<Directory> _backupDirectory() async {
+    if (_backupDirectoryOverride != null) {
+      final dir = _backupDirectoryOverride!;
+      if (!await dir.exists()) await dir.create(recursive: true);
+      return dir;
+    }
     final dir = await getApplicationDocumentsDirectory();
     final backupDir = Directory(p.join(dir.path, 'backups'));
     if (!await backupDir.exists()) await backupDir.create(recursive: true);
@@ -52,6 +75,11 @@ class BackupService {
   }
 
   Future<Directory> _productImagesDirectory() async {
+    if (_productImagesDirectoryOverride != null) {
+      final dir = _productImagesDirectoryOverride!;
+      if (!await dir.exists()) await dir.create(recursive: true);
+      return dir;
+    }
     final dir = await getApplicationDocumentsDirectory();
     final imageDir = Directory(p.join(dir.path, 'product_images'));
     if (!await imageDir.exists()) await imageDir.create(recursive: true);
@@ -76,14 +104,22 @@ class BackupService {
   Future<String> createBackup() async {
     final dbPath = await _db.getDatabasePath();
     final dbFile = File(dbPath);
-    if (!await dbFile.exists()) throw Exception('قاعدة البيانات غير موجودة');
+    if (!await dbFile.exists()) {
+      throw Exception('قاعدة البيانات غير موجودة');
+    }
 
-    // Close SQLite first so WAL/journal state is flushed before reading the file.
+    final db = await _db.database;
+    try {
+      await db.execute('PRAGMA wal_checkpoint(FULL)');
+    } catch (_) {
+      // Native SQLite may not use WAL; closing is still sufficient.
+    }
     await _db.close();
+
     final dbBytes = await dbFile.readAsBytes();
     final images = await _collectProductImages();
     final clearPayload = utf8.encode(jsonEncode({
-      'format': 'JPM-DATA-2',
+      'format': _dataFormat,
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'database': base64UrlEncode(dbBytes),
       'images': images,
@@ -91,7 +127,10 @@ class BackupService {
 
     final compressed = gzip.encode(clearPayload);
     final keyBytes = await _getOrCreateKey();
-    final secretBox = await _aes.encrypt(compressed, secretKey: SecretKey(keyBytes));
+    final secretBox = await _aes.encrypt(
+      compressed,
+      secretKey: SecretKey(keyBytes),
+    );
     final envelope = <String, dynamic>{
       'format': _format,
       'version': _version,
@@ -100,18 +139,14 @@ class BackupService {
     };
 
     final dir = await _backupDirectory();
-    final stamp = DateTime.now()
-        .toUtc()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .split('.')
-        .first;
+    final nowUtc = DateTime.now().toUtc();
+    final stamp = '${nowUtc.year.toString().padLeft(4, '0')}${nowUtc.month.toString().padLeft(2, '0')}${nowUtc.day.toString().padLeft(2, '0')}_${nowUtc.hour.toString().padLeft(2, '0')}${nowUtc.minute.toString().padLeft(2, '0')}${nowUtc.second.toString().padLeft(2, '0')}${nowUtc.millisecond.toString().padLeft(3, '0')}';
     final path = p.join(dir.path, 'jamal_phone_backup_$stamp.jpm');
     await File(path).writeAsString(jsonEncode(envelope), flush: true);
 
     final files = (await dir
             .list()
-            .where((e) => e is File && e.path.toLowerCase().endsWith('.jpm'))
+            .where((entity) => entity is File && entity.path.toLowerCase().endsWith('.jpm'))
             .toList())
         .whereType<File>()
         .toList()
@@ -128,9 +163,9 @@ class BackupService {
     final dir = await _backupDirectory();
     final files = (await dir
             .list()
-            .where((e) => e is File &&
-                (e.path.toLowerCase().endsWith('.jpm') ||
-                    e.path.toLowerCase().endsWith('.db')))
+            .where((entity) => entity is File &&
+                (entity.path.toLowerCase().endsWith('.jpm') ||
+                    entity.path.toLowerCase().endsWith('.db')))
             .toList())
         .whereType<File>()
         .toList();
@@ -147,9 +182,7 @@ class BackupService {
       throw Exception('صيغة النسخة المشفرة غير مدعومة');
     }
     final encoded = envelope['data'] as String?;
-    if (encoded == null || encoded.isEmpty) {
-      throw Exception('بيانات النسخة ناقصة');
-    }
+    if (encoded == null || encoded.isEmpty) throw Exception('بيانات النسخة ناقصة');
 
     final keyBytes = recoveryKey == null || recoveryKey.trim().isEmpty
         ? await _getOrCreateKey()
@@ -163,14 +196,12 @@ class BackupService {
     final version = (envelope['version'] as num?)?.toInt() ?? 1;
 
     if (version == 1) {
-      // Legacy v1 stored the raw SQLite bytes inside AES-GCM.
       return {'databaseBytes': decrypted, 'images': <dynamic>[]};
     }
     if (version != 2) throw Exception('إصدار النسخة غير مدعوم');
 
-    final decompressed = gzip.decode(decrypted);
-    final package = jsonDecode(utf8.decode(decompressed));
-    if (package is! Map || package['format'] != 'JPM-DATA-2') {
+    final package = jsonDecode(utf8.decode(gzip.decode(decrypted)));
+    if (package is! Map || package['format'] != _dataFormat) {
       throw Exception('بيانات النسخة غير صالحة');
     }
     final encodedDb = package['database'] as String?;
@@ -195,9 +226,7 @@ class BackupService {
 
   Future<void> _restoreImages(List<dynamic> entries) async {
     final dir = await _productImagesDirectory();
-    if (await dir.exists()) {
-      await dir.delete(recursive: true);
-    }
+    if (await dir.exists()) await dir.delete(recursive: true);
     await dir.create(recursive: true);
 
     final pathMap = <String, String>{};
@@ -211,14 +240,20 @@ class BackupService {
         final newPath = p.join(dir.path, fileName);
         await File(newPath).writeAsBytes(base64Url.decode(encoded), flush: true);
         if (oldPath.isNotEmpty) pathMap[oldPath] = newPath;
-      } catch (_) {
-        // One broken image must not destroy the rest of the database restore.
-      }
+      } catch (_) {}
     }
 
-    if (pathMap.isEmpty) return;
     final db = await _db.database;
     await db.transaction((txn) async {
+      if (pathMap.isEmpty) {
+        await txn.update(
+          'products',
+          {'image_path': null},
+          where: 'image_path LIKE ?',
+          whereArgs: [p.join(dir.path, '%')],
+        );
+        return;
+      }
       for (final entry in pathMap.entries) {
         await txn.update(
           'products',
@@ -237,7 +272,7 @@ class BackupService {
     final tempPath = '$dbPath.restore_tmp';
     List<dynamic> images = const [];
     try {
-      List<int> clear;
+      late List<int> clear;
       if (backupPath.toLowerCase().endsWith('.jpm')) {
         final package = await _decryptEnvelope(source, recoveryKey);
         clear = package['databaseBytes'] as List<int>;
@@ -248,10 +283,21 @@ class BackupService {
         throw Exception('صيغة النسخة غير مدعومة');
       }
 
-      await File(tempPath).writeAsBytes(clear, flush: true);
+      final tempFile = File(tempPath);
+      await tempFile.writeAsBytes(clear, flush: true);
+      final valid = await _db.validateDatabaseFile(tempPath);
+      if (!valid) throw Exception('قاعدة البيانات داخل النسخة غير صالحة');
       await _db.close();
-      await File(tempPath).copy(dbPath);
-      if (images.isNotEmpty) {
+      for (final sidecar in <String>['$dbPath-wal', '$dbPath-shm']) {
+        final file = File(sidecar);
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+      }
+      await tempFile.copy(dbPath);
+      if (backupPath.toLowerCase().endsWith('.jpm')) {
         await _restoreImages(images);
       }
     } finally {
@@ -272,7 +318,9 @@ class BackupService {
   }
 
   Future<void> shareRecoveryKey() async {
-    final key = await getRecoveryKey();
-    await Share.share(key, subject: 'مفتاح استعادة Jamal Phone Manager');
+    await Share.share(
+      await getRecoveryKey(),
+      subject: 'مفتاح استعادة Jamal Phone Manager',
+    );
   }
 }

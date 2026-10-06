@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../models/product.dart';
 import '../../services/barcode_lookup_service.dart';
-import '../../services/product_service.dart';
 import '../../providers/app_provider.dart';
 import '../barcode/barcode_scanner_screen.dart';
 
@@ -31,11 +30,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _warranty = TextEditingController();
   final _description = TextEditingController();
   final _attributes = TextEditingController();
-  final _productService = ProductService();
   final _lookupService = BarcodeLookupService();
   final _picker = ImagePicker();
   int? _categoryId;
   String? _imagePath;
+  String? _newImagePath;
+  bool _saved = false;
   bool _saving = false;
   bool _lookingUp = false;
 
@@ -96,7 +96,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     await targetDir.create(recursive: true);
     final fileName = 'product_${DateTime.now().millisecondsSinceEpoch}${p.extension(image.path)}';
     final saved = await File(image.path).copy(p.join(targetDir.path, fileName));
-    if (mounted) setState(() => _imagePath = saved.path);
+    if (_newImagePath != null && _newImagePath != widget.product?.imagePath) {
+      try { await File(_newImagePath!).delete(); } catch (_) {}
+    }
+    if (mounted) setState(() { _imagePath = saved.path; _newImagePath = saved.path; });
   }
 
   Future<void> _save() async {
@@ -122,10 +125,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         updatedAt: now,
       );
       if (widget.product == null) {
-        await _productService.insert(product);
+        await context.read<AppProvider>().productsService.insert(product);
       } else {
-        await _productService.update(product);
+        await context.read<AppProvider>().productsService.update(product);
       }
+      _saved = true;
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
@@ -145,7 +149,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       ],
     ));
     if (ok == true) {
-      await _productService.delete(widget.product!.id!);
+      await context.read<AppProvider>().productsService.delete(widget.product!.id!);
       if (mounted) Navigator.pop(context, true);
     }
   }
@@ -175,7 +179,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     : const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.add_a_photo, size: 42), SizedBox(height: 8), Text('صورة المنتج')])),
               ),
             ),
-            const SizedBox(height: 16),
+            if (_imagePath != null) Align(alignment: AlignmentDirectional.centerEnd, child: TextButton.icon(onPressed: () async { final old = _imagePath; setState(() => _imagePath = null); if (_newImagePath == old && old != widget.product?.imagePath) { try { await File(old!).delete(); } catch (_) {} } }, icon: const Icon(Icons.delete_outline), label: const Text('إزالة الصورة'))),
+            const SizedBox(height: 8),
             TextFormField(controller: _name, decoration: const InputDecoration(labelText: 'اسم المنتج *', prefixIcon: Icon(Icons.label)), validator: (v) => v == null || v.trim().isEmpty ? 'اسم المنتج مطلوب' : null),
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
@@ -221,6 +226,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   @override
   void dispose() {
+    if (!_saved && _newImagePath != null && _newImagePath != widget.product?.imagePath) {
+      File(_newImagePath!).delete();
+    }
     _name.dispose(); _brand.dispose(); _barcode.dispose(); _sell.dispose(); _cost.dispose(); _stock.dispose(); _minStock.dispose(); _warranty.dispose(); _description.dispose(); _attributes.dispose();
     super.dispose();
   }
